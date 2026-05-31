@@ -194,6 +194,8 @@
     };
 
     const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const CARD_FALLBACK_COLORS = ['#0891b2', '#dc2626', '#65a30d', '#d97706', '#7c3aed', '#be185d', '#0f766e'];
+    const CATEGORIZER_VERSION = 2;
     // MONTH_KEYS is derived dynamically from transaction data (see App component)
 
     // Card recommendations per category
@@ -297,6 +299,23 @@
                dateStr: `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}` };
     }
 
+    function parseAmount(amountStr) {
+      const cleaned = String(amountStr || '').replace(/[$,]/g, '').trim();
+      if (/^\(.*\)$/.test(cleaned)) return -parseFloat(cleaned.slice(1, -1));
+      return parseFloat(cleaned);
+    }
+
+    function monthLabel(monthKey) {
+      const [, month] = String(monthKey || '').split('-');
+      return MONTHS_SHORT[Number(month) - 1] || monthKey;
+    }
+
+    function getCardConfig(card, index = 0) {
+      if (CARD_CONFIG[card]) return CARD_CONFIG[card];
+      const color = CARD_FALLBACK_COLORS[index % CARD_FALLBACK_COLORS.length];
+      return { color, label: card, short: card, emoji: '💳' };
+    }
+
     function detectCard(headerLine) {
       const h = headerLine.toLowerCase();
       if (h.includes('card member') && h.includes('account #')) return 'amex';
@@ -313,7 +332,7 @@
         const cols = parseCSVRow(lines[i]);
         if (cols.length < 5) continue;
         const [dateRaw, description, cardMember, , amountStr] = cols;
-        const amount = parseFloat(amountStr);
+        const amount = parseAmount(amountStr);
         if (isNaN(amount) || amount <= 0) continue; // negative = payment
         const desc = description.trim();
         if (/online payment|payment.*thank/i.test(desc)) continue;
@@ -336,7 +355,7 @@
         if (cols.length < 7) continue;
         const [txDate, , description, merchant, category, type, amountStr, purchasedBy] = cols;
         if (type === 'Payment') continue;
-        const amount = parseFloat(amountStr);
+        const amount = parseAmount(amountStr);
         if (isNaN(amount) || amount <= 0) continue;
         const dt = parseDate(txDate.trim());
         if (!dt) continue;
@@ -359,7 +378,7 @@
         if (cols.length < 6) continue;
         const [txDate, , description, category, type, amountStr] = cols;
         if (type === 'Payment') continue;
-        const amount = parseFloat(amountStr);
+        const amount = parseAmount(amountStr);
         if (isNaN(amount) || amount >= 0) continue; // positive = credit/cashback
         const dt = parseDate(txDate.trim());
         if (!dt) continue;
@@ -623,6 +642,10 @@
       for (const rule of RULES) {
         if (rule.test(tx)) return rule.cat;
       }
+      const originalCategory = categoryFromOriginalCategory(tx.originalCategory);
+      if (originalCategory) return originalCategory;
+      const merchantCategory = categoryFromMerchantHints(tx);
+      if (merchantCategory) return merchantCategory;
       return 'Other';
     }
 
@@ -665,6 +688,50 @@
       s = s.replace(/\s{2,}/g, ' ').trim();
       if (!s) return name;
       return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    function categoryFromOriginalCategory(originalCategory) {
+      const oc = (originalCategory || '').toLowerCase();
+      if (!oc) return null;
+      if (/restaurants?|food\s*&\s*drink|dining/.test(oc)) return 'Dining & Restaurants';
+      if (/grocer|supermarket/.test(oc)) return 'Groceries';
+      if (/travel|transport|taxi|rideshare|parking|gas|fuel/.test(oc)) return 'Travel & Transport';
+      if (/medical|health|pharmacy|drugstore|doctor|dent(al|ist)/.test(oc)) return 'Health & Medical';
+      if (/entertainment|movie|music|ticket|sports/.test(oc)) return 'Entertainment & Sports';
+      if (/utilities|phone|internet|cable/.test(oc)) return 'Utilities';
+      if (/shopping|retail|merchandise|department store/.test(oc)) return 'Shopping & Retail';
+      if (/fees?|interest|adjustments?/.test(oc)) return 'Fees & Interest';
+      return null;
+    }
+
+    function categoryFromMerchantHints(tx) {
+      const text = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase();
+      const checks = [
+        ['Dining & Restaurants', /\b(grill|kitchen|restaurant|bistro|bar|pizza|sushi|cafe|deli|bakery|taqueria|steakhouse|tavern)\b/],
+        ['Coffee', /\b(coffee|espresso|latte|cappuccino)\b/],
+        ['Groceries', /\b(market|grocery|supermarket|foods?|farm|butcher|provisions)\b/],
+        ['Shopping & Retail', /\b(store|shop|outlet|apparel|clothing|shoes|sneaker|books?|amazon|etsy|poshmark|boutique)\b/],
+        ['Travel & Transport', /\b(airline|airport|hotel|inn|resort|taxi|uber|lyft|parking|garage|train|toll|gas|fuel|rental car)\b/],
+        ['Health & Medical', /\b(pharmacy|medical|doctor|dental|dentist|clinic|hospital|therapy|therapist|health)\b/],
+        ['Home & Garden', /\b(garden|nursery|hardware|home|furniture|paint|plumb|electric|pest|landscap)\b/],
+        ['Beauty & Wellness', /\b(salon|spa|nail|hair|beauty|cosmetic|skincare|massage)\b/],
+        ['Entertainment & Sports', /\b(theater|theatre|cinema|concert|ticket|museum|sporting|venue)\b/],
+        ['Fitness', /\b(gym|fitness|pilates|yoga|cycling|workout|athletic)\b/],
+        ['Pet Care', /\b(pet|animal|vet|veterinary|dog|cat)\b/],
+        ['Technology', /\b(software|cloud|hosting|domain|computer|electronics|apple|google|microsoft|openai|anthropic|claude)\b/],
+        ['Subscriptions', /\b(subscription|membership|monthly|annual|renewal|recurring|bill)\b/],
+        ['Charity & Donations', /\b(donation|charity|foundation|nonprofit|non-profit|fundraiser)\b/],
+        ['Flowers & Gifts', /\b(flower|florist|gift|bouquet)\b/],
+        ['Wine & Spirits', /\b(wine|liquor|spirits|brewery|vineyard)\b/],
+        ['Dry Cleaning', /\b(cleaners?|laundry|tailor|alteration)\b/],
+        ['Auto Maintenance', /\b(auto|automotive|mechanic|repair|tires?|oil change|car wash)\b/],
+      ];
+      const match = checks.find(([, pattern]) => pattern.test(text));
+      return match ? match[0] : null;
+    }
+
+    function suggestCategory(tx) {
+      return categoryFromOriginalCategory(tx.originalCategory) || categoryFromMerchantHints(tx);
     }
 
     // ─────────────────────────────────────────
@@ -731,6 +798,13 @@
       const chartInst = useRef();
       const isDark = React.useContext(ThemeCtx);
       const cc = useChartColors();
+      const cardNames = Object.keys(monthlyByCard).sort((a, b) => {
+        const preferred = ['Amex', 'Apple Card', 'Chase'];
+        const ai = preferred.indexOf(a);
+        const bi = preferred.indexOf(b);
+        if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        return a.localeCompare(b);
+      });
       useEffect(() => {
         if (!ref.current) return;
         if (chartInst.current) chartInst.current.destroy();
@@ -738,12 +812,17 @@
         chartInst.current = new Chart(ctx, {
           type: 'bar',
           data: {
-            labels: MONTHS_SHORT,
-            datasets: [
-              { label: 'Amex',       data: monthKeys.map(m => monthlyByCard['Amex']?.[m] || 0),       backgroundColor: 'rgba(37,99,235,0.85)',  borderRadius: 4, borderSkipped: false },
-              { label: 'Apple Card', data: monthKeys.map(m => monthlyByCard['Apple Card']?.[m] || 0), backgroundColor: 'rgba(124,58,237,0.85)', borderRadius: 4, borderSkipped: false },
-              { label: 'Chase',      data: monthKeys.map(m => monthlyByCard['Chase']?.[m] || 0),      backgroundColor: 'rgba(14,165,233,0.85)', borderRadius: 4, borderSkipped: false },
-            ]
+            labels: monthKeys.map(monthLabel),
+            datasets: cardNames.map((card, i) => {
+              const cfg = getCardConfig(card, i);
+              return {
+                label: cfg.short || card,
+                data: monthKeys.map(m => monthlyByCard[card]?.[m] || 0),
+                backgroundColor: cfg.color + 'd9',
+                borderRadius: 4,
+                borderSkipped: false,
+              };
+            })
           },
           options: {
             responsive: true, maintainAspectRatio: false,
@@ -764,7 +843,7 @@
           }
         });
         return () => { if (chartInst.current) chartInst.current.destroy(); };
-      }, [JSON.stringify(monthlyByCard), isDark]);
+      }, [JSON.stringify(monthlyByCard), JSON.stringify(monthKeys), isDark]);
       return <div style={{ height: 280 }}><canvas ref={ref} /></div>;
     }
 
@@ -858,7 +937,9 @@
       const [drag, setDrag] = useState(false);
 
       const handleDrop = e => {
-        e.preventDefault(); setDrag(false);
+        e.preventDefault();
+        e.stopPropagation();
+        setDrag(false);
         onFiles(Array.from(e.dataTransfer.files));
       };
       const handlePick = e => {
@@ -958,14 +1039,14 @@
       const total = transactions.reduce((s,t) => s+t.amount, 0);
       const txCount = transactions.length;
       const topCat = categoryData[0];
+      const activeMonthCount = new Set(transactions.map(t => t.monthKey)).size || 1;
       const peakMonth = useMemo(() => {
         const byM = {};
         transactions.forEach(t => { byM[t.monthKey] = (byM[t.monthKey]||0) + t.amount; });
         const sorted = Object.entries(byM).sort((a,b)=>b[1]-a[1]);
         if (!sorted.length) return null;
         const [key, val] = sorted[0];
-        const idx = monthKeys.indexOf(key);
-        return { label: MONTHS_SHORT[idx] || key, val };
+        return { label: monthLabel(key), val };
       }, [transactions]);
 
       const donutData = useMemo(() => {
@@ -981,7 +1062,7 @@
           {/* Stats row */}
           <div className="grid-4" style={{ marginBottom: 24 }}>
             <StatCard icon="💰" label="Total Spend" value={fmt(total)} sub={`${txCount} transactions`} color="#3b82f6" />
-            <StatCard icon="📊" label="Monthly Avg" value={fmt(total/12)} sub="Across all cards" color="#8b5cf6" />
+            <StatCard icon="📊" label="Monthly Avg" value={fmt(total/activeMonthCount)} sub={`Across ${activeMonthCount} active month${activeMonthCount !== 1 ? 's' : ''}`} color="#8b5cf6" />
             <StatCard icon="🏆" label="Top Category" value={topCat?.category || '—'} sub={topCat ? fmt(topCat.total) : ''} color="#f59e0b" />
             <StatCard icon="📅" label="Peak Month" value={peakMonth?.label || '—'} sub={peakMonth ? fmt(peakMonth.val) : ''} color="#ef4444" />
           </div>
@@ -1002,7 +1083,7 @@
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {donutData.map(d => {
                   const cfg = d._overflow ? { color: 'var(--text-dim)', icon: '…' } : (CATEGORY_CONFIG[d.category] || CATEGORY_CONFIG['Other']);
-                  const pct = ((d.total/total)*100).toFixed(1);
+                  const pct = total > 0 ? ((d.total/total)*100).toFixed(1) : '0.0';
                   return (
                     <div key={d.category} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 10, height: 10, borderRadius: 3, background: cfg.color, flexShrink: 0 }} />
@@ -1021,8 +1102,8 @@
               <MonthlyBarChart monthlyByCard={monthlyByCard} monthKeys={monthKeys} />
               {/* Card totals */}
               <div style={{ display: 'flex', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
-                {Object.entries(cardData).map(([card, total]) => {
-                  const cfg = CARD_CONFIG[card];
+                {Object.entries(cardData).map(([card, total], idx) => {
+                  const cfg = getCardConfig(card, idx);
                   return (
                     <div key={card} style={{ flex: 1, minWidth: 120, background: cfg.color + '15', border: `1px solid ${cfg.color}30`, borderRadius: 10, padding: '12px 16px' }}>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{cfg.emoji} {cfg.label}</div>
@@ -1233,8 +1314,8 @@
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', padding: '4px 10px', color: 'var(--text-dim)', fontWeight: 600, whiteSpace: 'nowrap', minWidth: 160 }}>Category</th>
-                  {MONTHS_SHORT.map(mo => (
-                    <th key={mo} style={{ padding: '4px 6px', color: 'var(--text-dim)', fontWeight: 600, textAlign: 'center', minWidth: 54 }}>{mo}</th>
+                  {monthKeys.map(mk => (
+                    <th key={mk} style={{ padding: '4px 6px', color: 'var(--text-dim)', fontWeight: 600, textAlign: 'center', minWidth: 54 }}>{monthLabel(mk)}</th>
                   ))}
                   <th style={{ padding: '4px 10px', color: 'var(--text-dim)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>Total</th>
                 </tr>
@@ -1389,12 +1470,11 @@
             <div className="section-title">Monthly Spending Trend</div>
             <MonthlyBarChart monthlyByCard={monthlyByCard} monthKeys={monthKeys} />
             <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
-              {MONTHS_SHORT.map((mo, idx) => {
-                const key = monthKeys[idx];
+              {monthKeys.map((key) => {
                 const total = Object.values(monthlyByCard).reduce((s, byM) => s + (byM[key]||0), 0);
                 return (
-                  <div key={mo} style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-deep)', borderRadius: 8 }}>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 2 }}>{mo}</div>
+                  <div key={key} style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-deep)', borderRadius: 8 }}>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 2 }}>{monthLabel(key)}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: total > 0 ? 'var(--text-base)' : 'var(--border-mid)' }}>
                       {total > 0 ? fmtK(total) : '—'}
                     </div>
@@ -1465,6 +1545,106 @@
               onMouseEnter={e => e.target.style.color='#ef4444'}
               onMouseLeave={e => e.target.style.color='var(--text-dim)'}
             >✕</button>
+          )}
+        </div>
+      );
+    }
+
+    function OtherReviewPanel({ transactions, onOverride, onFilterOther }) {
+      const [choices, setChoices] = useState({});
+
+      const otherGroups = useMemo(() => {
+        const groups = {};
+        transactions.filter(t => t.category === 'Other').forEach(t => {
+          const key = t._merchantKey || cleanMerchant(t.merchant || t.description);
+          if (!groups[key]) {
+            groups[key] = { key, total: 0, count: 0, sample: t, suggested: suggestCategory(t) };
+          }
+          groups[key].total += t.amount;
+          groups[key].count += 1;
+          if (!groups[key].suggested) groups[key].suggested = suggestCategory(t);
+        });
+        return Object.values(groups).sort((a, b) => b.total - a.total);
+      }, [transactions]);
+
+      if (!otherGroups.length) return null;
+
+      const topGroups = otherGroups.slice(0, 10);
+      const suggestedCount = otherGroups.filter(g => g.suggested).length;
+      const applyCategory = (group, category) => {
+        if (!category) return;
+        onOverride(group.sample, category);
+      };
+
+      return (
+        <div style={{ background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontWeight: 800, color: 'var(--text-hi)', fontSize: 15, marginBottom: 3 }}>Other Review</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                {otherGroups.length} merchant group{otherGroups.length !== 1 ? 's' : ''} still uncategorized · {suggestedCount} with suggested categories
+              </div>
+            </div>
+            <button
+              onClick={onFilterOther}
+              style={{ background: 'var(--border)', color: 'var(--text-sub)', border: '1px solid var(--border-mid)', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700 }}
+            >
+              Show Other only
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {topGroups.map(group => {
+              const suggested = group.suggested;
+              const selected = choices[group.key] || suggested || '';
+              const selectedCfg = selected ? CATEGORY_CONFIG[selected] : null;
+              return (
+                <div key={group.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 90px minmax(160px, 220px) auto', gap: 10, alignItems: 'center', background: 'var(--bg-mid)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="truncate" title={group.key} style={{ color: 'var(--text-base)', fontWeight: 700, fontSize: 13 }}>{group.key}</div>
+                    <div className="truncate" title={group.sample.description} style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+                      {group.count} tx · sample: {group.sample.description}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', color: 'var(--text-hi)', fontWeight: 800, fontSize: 13 }}>{fmt(group.total)}</div>
+                  <select
+                    value={selected}
+                    onChange={e => setChoices(prev => ({ ...prev, [group.key]: e.target.value }))}
+                    style={{ width: '100%', fontSize: 12, padding: '6px 8px' }}
+                  >
+                    <option value="">Choose category...</option>
+                    {Object.keys(CATEGORY_CONFIG).filter(cat => cat !== 'Other').sort().map(cat => {
+                      const c = CATEGORY_CONFIG[cat];
+                      return <option key={cat} value={cat}>{c.icon} {cat}</option>;
+                    })}
+                  </select>
+                  <button
+                    onClick={() => applyCategory(group, selected)}
+                    disabled={!selected}
+                    title={suggested ? `Suggested from merchant/category hints: ${suggested}` : 'Apply selected category to this merchant'}
+                    style={{
+                      background: selected ? (selectedCfg?.color || '#3b82f6') + '22' : 'transparent',
+                      color: selected ? (selectedCfg?.color || '#93c5fd') : 'var(--text-dim)',
+                      border: `1px solid ${selected ? (selectedCfg?.color || '#3b82f6') : 'var(--border-mid)'}`,
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      whiteSpace: 'nowrap',
+                      cursor: selected ? 'pointer' : 'default',
+                    }}
+                  >
+                    {suggested && selected === suggested ? 'Apply suggestion' : 'Apply'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {otherGroups.length > topGroups.length && (
+            <div style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 10 }}>
+              Showing the top {topGroups.length} uncategorized merchant groups by spend. Use the Other filter to review the full list.
+            </div>
           )}
         </div>
       );
@@ -1562,6 +1742,12 @@
             <span>Click any <strong style={{ color: 'var(--text-muted)' }}>category badge</strong> to reassign it. The app <strong style={{ color: 'var(--text-muted)' }}>learns the rule for that merchant</strong> — every transaction from that merchant updates instantly and the rule persists across sessions. Learned transactions show <strong style={{ color: 'var(--text-muted)' }}>🧠</strong>.</span>
           </div>
 
+          <OtherReviewPanel
+            transactions={transactions}
+            onOverride={onOverride}
+            onFilterOther={() => setCatF('Other')}
+          />
+
           <div className="overflow-x-auto">
             <table style={{ fontSize: 13 }}>
               <thead>
@@ -1588,7 +1774,7 @@
               </thead>
               <tbody>
                 {pageTxs.map(t => {
-                  const cardCfg = CARD_CONFIG[t.card] || {};
+                  const cardCfg = getCardConfig(t.card);
                   return (
                     <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                       <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
@@ -2089,7 +2275,7 @@
                         </thead>
                         <tbody>
                           {largeDonations.map(t => {
-                            const cardCfg = CARD_CONFIG[t.card] || {};
+                            const cardCfg = getCardConfig(t.card);
                             return (
                               <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                                 <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
@@ -2133,7 +2319,7 @@
                         )}
                         <tbody>
                           {smallDonations.map(t => {
-                            const cardCfg = CARD_CONFIG[t.card] || {};
+                            const cardCfg = getCardConfig(t.card);
                             return (
                               <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                                 <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
@@ -2236,7 +2422,7 @@
                   </thead>
                   <tbody>
                     {medicalTxs.map(t => {
-                      const cardCfg = CARD_CONFIG[t.card] || {};
+                      const cardCfg = getCardConfig(t.card);
                       return (
                         <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                           <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
@@ -2294,7 +2480,7 @@
           if (t.category === 'Subscriptions') groups[key].category = 'Subscriptions';
         });
         return Object.values(groups)
-          .filter(g => g.months.size >= 6)
+          .filter(g => g.months.size >= 2)
           .map(g => {
             const amounts = g.transactions.map(t => t.amount);
             const total = amounts.reduce((s, v) => s + v, 0);
@@ -2440,7 +2626,7 @@
 
       const handleResetAll = useCallback(() => {
         setOverrides({});
-        localStorage.removeItem('spending-merchant-rules');
+        localStorage.setItem('spending-merchant-rules', '{}');
       }, []);
 
       const processFile = useCallback((text, name, cardType) => {
@@ -2477,6 +2663,7 @@
 
       // Global drop target
       const handleGlobalDrop = useCallback((e) => {
+        if (e.defaultPrevented) return;
         e.preventDefault();
         handleFiles(Array.from(e.dataTransfer.files));
       }, [handleFiles]);
@@ -2507,7 +2694,7 @@
         const categorized = all.map(t => ({ ...t, category: categorize(t) }));
         categorized.sort((a,b) => b.dateStr.localeCompare(a.dateStr));
         setTransactions(categorized);
-      }, [loadedFileList]);
+      }, [loadedFileList, CATEGORIZER_VERSION]);
 
       const loadedFiles = loadedFileList.map(f => {
         const o = CARD_OPTIONS.find(x => x.value === f.cardType) || { label: f.cardType, color: 'var(--text-muted)', emoji: '📄' };
