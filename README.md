@@ -154,7 +154,13 @@ A hand-rolled CSV parser handles quoted fields and escaped quotes (`""`). Each c
 
 ### Categorization Engine
 
-Rules are evaluated in priority order — more specific rules (e.g. `Pet Care`, `Golf`) run before broader ones (e.g. `Dining`, `Shopping`). Each rule is a predicate function that receives the full transaction object, allowing rules to test description text, original card category, and merchant name simultaneously.
+Rules are evaluated in priority order — more specific rules (e.g. `Pet Care`, `Golf`) run before broader ones (e.g. `Dining`, `Shopping`). Before categorization, each transaction receives a canonical merchant identity and readable display name, so rules can test the raw statement text, original card category, canonical merchant, and cleaned display name together.
+
+### Merchant Display Names
+
+Raw statement descriptions are preserved, but the dashboard formats noisy merchant text into readable display names for tables, charts, recurring-charge groups, and review workflows. For example, a statement label such as `Hillstone 212.689.10new york ny` displays as `Hillstone Restaurant`, while the original text remains available in tooltips and copied tax-prep output.
+
+The app also keeps a separate canonical merchant identity for grouping and learned rules. This lets processor variants collapse into the same merchant even when their statement text differs. For example, `MANHATTAN CTR FOR CBNEW YORK` and `PROPAY*Manhattan Cen6468634225 NY` both resolve to `Manhattan Center for CBT`; recurring equal-amount charges are a useful signal when deciding which aliases should be merged.
 
 ---
 
