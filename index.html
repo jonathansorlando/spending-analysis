@@ -195,7 +195,7 @@
 
     const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const CARD_FALLBACK_COLORS = ['#0891b2', '#dc2626', '#65a30d', '#d97706', '#7c3aed', '#be185d', '#0f766e'];
-    const CATEGORIZER_VERSION = 2;
+    const CATEGORIZER_VERSION = 4;
     // MONTH_KEYS is derived dynamically from transaction data (see App component)
 
     // Card recommendations per category
@@ -605,6 +605,7 @@
             || /cheese shoppe|sq \*little canal/i.test(d)
             || /\bdiner\b|\bcafe\b/i.test(d)
             || /restaurant|food.*bar|delis 48|la fabbrica|sq \*shake shack/i.test(d)
+            || /hillstone/i.test(d)
             || /arlo midtown|barons cove|rosewood cdl|rest fairmont|lessing/i.test(d)
             || /daniel\b|the jazz club|eh grill|i sodi|sag harbor tavern|lstaurant/i.test(d)
             || /lsu calissa|estias|a&s.*bridgehampton|round swamp farm/i.test(d);
@@ -690,6 +691,173 @@
       return s.charAt(0).toUpperCase() + s.slice(1);
     }
 
+    function canonicalMerchantIdentity(tx) {
+      const raw = decodeHTML(`${tx.merchant || ''} ${tx.description || ''}`).toLowerCase();
+      const knownIdentities = [
+        {
+          key: 'Manhattan Center for CBT',
+          patterns: [
+            /manhattan\s+ctr\s+for\s+cbnew\s*york/,
+            /manhattan\s+(ctr|center)\s+for\s+cbt?/,
+            /manhattan\s+cen/,
+            /propay\*manhattan\s+cen/,
+          ],
+        },
+        {
+          key: 'Factor',
+          patterns: [/factor\s*75/, /factor meals/],
+        },
+        {
+          key: 'Mercedes Benz of Southampton',
+          patterns: [/mercedes[-\s]?benz.*southampton/],
+        },
+      ];
+      const matched = knownIdentities.find(identity => identity.patterns.some(pattern => pattern.test(raw)));
+      if (matched) return matched.key;
+      return cleanMerchant(tx.merchant || tx.description);
+    }
+
+    function getMerchantOverride(overrides, merchantKey) {
+      if (overrides[merchantKey] !== undefined) return overrides[merchantKey];
+      const foundKey = Object.keys(overrides).find(key => key.toLowerCase() === String(merchantKey).toLowerCase());
+      return foundKey ? overrides[foundKey] : undefined;
+    }
+
+    function titleCaseMerchant(name) {
+      const smallWords = new Set(['and', 'of', 'the', 'for', 'at', 'in', 'on', 'to', 'by']);
+      const acronyms = new Set(['MTA', 'NYC', 'USPS', 'UPS', 'FTD', 'CVS', 'HBO', 'NY', 'US', 'UK']);
+      return (name || '')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word, index) => {
+          const bare = word.replace(/[^a-z0-9]/gi, '').toUpperCase();
+          if (acronyms.has(bare)) return bare;
+          if (index > 0 && smallWords.has(word)) return word;
+          if (/^\d/.test(word)) return word.toUpperCase();
+          return word.charAt(0).toUpperCase() + word.slice(1);
+        })
+        .join(' ');
+    }
+
+    function formatMerchantName(tx) {
+      const source = decodeHTML(tx.merchant || tx.description || '');
+      const original = source.trim();
+      if (!original) return 'Unknown Merchant';
+
+      const lower = original.toLowerCase();
+      const locationAliases = [
+        {
+          merchant: /mercedes[-\s]?benz/,
+          locations: [
+            [/southampton/, 'Mercedes Benz of Southampton'],
+          ],
+          fallback: 'Mercedes Benz',
+        },
+      ];
+      for (const alias of locationAliases) {
+        if (alias.merchant.test(lower)) {
+          const located = alias.locations.find(([pattern]) => pattern.test(lower));
+          return located ? located[1] : alias.fallback;
+        }
+      }
+
+      const known = [
+        [/manhattan\s+ctr\s+for\s+cbnew\s*york|manhattan\s+(ctr|center)\s+for\s+cbt?|propay\*manhattan\s+cen/, 'Manhattan Center for CBT'],
+        [/factor\s*75|factor meals|factor75/, 'Factor'],
+        [/hillstone/, 'Hillstone Restaurant'],
+        [/wholefds|whole foods/, 'Whole Foods Market'],
+        [/trader joe/, "Trader Joe's"],
+        [/amazon\.com|amazon market/, 'Amazon'],
+        [/apple\.com\/bill|apple services/, 'Apple Services'],
+        [/apple store|apple online store/, 'Apple Store'],
+        [/google \*google one|google one/, 'Google One'],
+        [/mta\/tbta|nyct paygo|mta\*/, 'MTA / TBTA'],
+        [/citi bike/, 'Citi Bike'],
+        [/uber eats|ubereats/, 'Uber Eats'],
+        [/\buber\b/, 'Uber'],
+        [/\blyft\b/, 'Lyft'],
+        [/doordash|dd \*doordash/, 'DoorDash'],
+        [/siriusxm|sxm/, 'SiriusXM'],
+        [/netflix/, 'Netflix'],
+        [/spotify/, 'Spotify'],
+        [/hulu/, 'Hulu'],
+        [/disney\+/, 'Disney+'],
+        [/hbo max/, 'HBO Max'],
+        [/costco gas/, 'Costco Gas'],
+        [/fedex/, 'FedEx'],
+        [/united states postal service|usps/, 'USPS'],
+        [/target\.com|target plus|\btarget\b/, 'Target'],
+        [/walmart\.com|\bwalmart\b/, 'Walmart'],
+        [/home depot/, 'Home Depot'],
+        [/lowe'?s/, "Lowe's"],
+        [/walgreens/, 'Walgreens'],
+        [/duane reade/, 'Duane Reade'],
+        [/cvs\/pharmacy|\bcvs\b/, 'CVS Pharmacy'],
+        [/shake shack/, 'Shake Shack'],
+        [/eataly/, 'Eataly'],
+        [/sweetgreen/, 'Sweetgreen'],
+        [/starbucks/, 'Starbucks'],
+        [/dunkin/, 'Dunkin'],
+        [/blue bottle/, 'Blue Bottle Coffee'],
+        [/la colombe/, 'La Colombe Coffee'],
+        [/zibetto espresso/, 'Zibetto Espresso'],
+        [/equinox/, 'Equinox'],
+        [/orangetheory|orange theory|otf /, 'Orangetheory Fitness'],
+        [/peloton/, 'Peloton'],
+        [/petco/, 'Petco'],
+        [/petsmart/, 'PetSmart'],
+        [/the farmer'?s dog|thefarmersdog/, "The Farmer's Dog"],
+        [/nationwide pet/, 'Nationwide Pet Insurance'],
+        [/amica insurance/, 'Amica Insurance'],
+        [/con edison/, 'Con Edison'],
+        [/verizon/, 'Verizon'],
+        [/at&t/, 'AT&T'],
+        [/t-mobile/, 'T-Mobile'],
+        [/spectrum|charter commun/, 'Spectrum'],
+        [/xfinity|comcast/, 'Xfinity'],
+        [/ez-pass|ezpass/, 'E-ZPass'],
+        [/tesla supercharger/, 'Tesla Supercharger'],
+        [/\btesla\b/, 'Tesla'],
+        [/jetblue/, 'JetBlue'],
+        [/delta/, 'Delta Air Lines'],
+        [/united air/, 'United Airlines'],
+        [/american air/, 'American Airlines'],
+        [/hertz/, 'Hertz'],
+        [/claude\.ai|anthropic/, 'Claude AI'],
+        [/1password/, '1Password'],
+        [/bitdefender/, 'Bitdefender'],
+      ];
+      const matched = known.find(([pattern]) => pattern.test(lower));
+      if (matched) return matched[1];
+
+      let cleaned = original;
+      cleaned = cleaned.replace(/^(TST\*|SP\s+|SQ\s+\*|AplPay\s+|FSP\*|DD\s+\*|GLF\*|VTG\*|BT\*|PY\s+\*|PAR\*|IN\s+\*)/i, '');
+      cleaned = cleaned.replace(/\*[a-z0-9]{4,}/gi, ' ');
+      cleaned = cleaned.replace(/https?:\/\/|www\./gi, '');
+      cleaned = cleaned.replace(/\.(com|net|org|co|io|ai)\b/gi, ' ');
+      cleaned = cleaned.replace(/\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g, ' ');
+      cleaned = cleaned.replace(/\b\d{3}\.\d{3}\.\d{2,}\b/g, ' ');
+      cleaned = cleaned.replace(/\b\d{6,}\b/g, ' ');
+      cleaned = cleaned.replace(/\s*#[a-z0-9-]+/gi, ' ');
+      cleaned = cleaned.replace(/\b0{2,}\w+\b/gi, ' ');
+      cleaned = cleaned.replace(/\b(new york|brooklyn|manhattan|southampton|sag harbor|bridgehampton|riverhead|charlottesville|los angeles|philadelphia|napa|london|paris|cancun|cancún)\b.*$/i, '');
+      cleaned = cleaned.replace(/\s+\b(al|ak|az|ar|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|gb|fr|mx)\b\s*$/i, '');
+      cleaned = cleaned.replace(/\b(llc|inc|corp|co|ltd|usa|online)\b\.?/gi, ' ');
+      cleaned = cleaned.replace(/[^a-z0-9&'+/\-\s]/gi, ' ');
+      cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+
+      if (!cleaned) return original.substring(0, 38);
+      const titled = titleCaseMerchant(cleaned);
+      if (tx.category === 'Dining & Restaurants' && !/\b(restaurant|cafe|coffee|bar|grill|pizza|sushi|deli|bakery)\b/i.test(titled)) {
+        return `${titled} Restaurant`;
+      }
+      if (tx.category === 'Coffee' && !/\bcoffee|espresso|cafe\b/i.test(titled)) {
+        return `${titled} Coffee`;
+      }
+      return titled.substring(0, 48);
+    }
+
     function categoryFromOriginalCategory(originalCategory) {
       const oc = (originalCategory || '').toLowerCase();
       if (!oc) return null;
@@ -705,9 +873,9 @@
     }
 
     function categoryFromMerchantHints(tx) {
-      const text = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase();
+      const text = `${tx.description || ''} ${tx.merchant || ''} ${tx.displayMerchant || ''} ${tx._merchantKey || ''}`.toLowerCase();
       const checks = [
-        ['Dining & Restaurants', /\b(grill|kitchen|restaurant|bistro|bar|pizza|sushi|cafe|deli|bakery|taqueria|steakhouse|tavern)\b/],
+        ['Dining & Restaurants', /\b(hillstone|grill|kitchen|restaurant|bistro|bar|pizza|sushi|cafe|deli|bakery|taqueria|steakhouse|tavern)\b/],
         ['Coffee', /\b(coffee|espresso|latte|cappuccino)\b/],
         ['Groceries', /\b(market|grocery|supermarket|foods?|farm|butcher|provisions)\b/],
         ['Shopping & Retail', /\b(store|shop|outlet|apparel|clothing|shoes|sneaker|books?|amazon|etsy|poshmark|boutique)\b/],
@@ -1156,7 +1324,7 @@
       const topMerchants = useMemo(() => {
         const byM = {};
         catTxs.forEach(t => {
-          const key = normalizeForGrouping(t._merchantKey);
+          const key = normalizeForGrouping(t.displayMerchant || t._merchantKey);
           if (!byM[key]) byM[key] = { name: key, total: 0, count: 0 };
           byM[key].total += t.amount;
           byM[key].count++;
@@ -1499,8 +1667,8 @@
 
     function CategoryCell({ tx, overrides, onOverride }) {
       const [editing, setEditing] = useState(false);
-      const mk = tx._merchantKey || cleanMerchant(tx.merchant || tx.description);
-      const isLearned = overrides[mk] !== undefined;
+      const mk = tx._merchantKey || canonicalMerchantIdentity(tx);
+      const isLearned = getMerchantOverride(overrides, mk) !== undefined;
       const cfg = CATEGORY_CONFIG[tx.category] || CATEGORY_CONFIG['Other'];
       const autoLabel = tx._autoCategory && tx._autoCategory !== tx.category
         ? `Learned rule · was: ${tx._autoCategory} · Click to change`
@@ -1556,9 +1724,9 @@
       const otherGroups = useMemo(() => {
         const groups = {};
         transactions.filter(t => t.category === 'Other').forEach(t => {
-          const key = t._merchantKey || cleanMerchant(t.merchant || t.description);
+          const key = t._merchantKey || canonicalMerchantIdentity(t);
           if (!groups[key]) {
-            groups[key] = { key, total: 0, count: 0, sample: t, suggested: suggestCategory(t) };
+            groups[key] = { key, name: t.displayMerchant || key, total: 0, count: 0, sample: t, suggested: suggestCategory(t) };
           }
           groups[key].total += t.amount;
           groups[key].count += 1;
@@ -1601,9 +1769,9 @@
               return (
                 <div key={group.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 90px minmax(160px, 220px) auto', gap: 10, alignItems: 'center', background: 'var(--bg-mid)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
                   <div style={{ minWidth: 0 }}>
-                    <div className="truncate" title={group.key} style={{ color: 'var(--text-base)', fontWeight: 700, fontSize: 13 }}>{group.key}</div>
+                    <div className="truncate" title={group.key} style={{ color: 'var(--text-base)', fontWeight: 700, fontSize: 13 }}>{group.name}</div>
                     <div className="truncate" title={group.sample.description} style={{ color: 'var(--text-dim)', fontSize: 11 }}>
-                      {group.count} tx · sample: {group.sample.description}
+                      {group.count} tx · sample: {group.sample.displayMerchant || group.sample.description}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', color: 'var(--text-hi)', fontWeight: 800, fontSize: 13 }}>{fmt(group.total)}</div>
@@ -1672,10 +1840,12 @@
         let txs = transactions.filter(t => {
           if (cardF !== 'all' && t.card !== cardF) return false;
           if (catF !== 'all' && t.category !== catF) return false;
-          if (modifiedOnly && overrides[t._merchantKey] === undefined) return false;
+          if (modifiedOnly && getMerchantOverride(overrides, t._merchantKey) === undefined) return false;
           if (search) {
             const q = search.toLowerCase();
-            if (!t.description.toLowerCase().includes(q) && !(t.merchant||'').toLowerCase().includes(q)) return false;
+            if (!t.description.toLowerCase().includes(q)
+              && !(t.merchant||'').toLowerCase().includes(q)
+              && !(t.displayMerchant||'').toLowerCase().includes(q)) return false;
           }
           return true;
         });
@@ -1778,7 +1948,12 @@
                   return (
                     <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                       <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} className="truncate" title={t.description}>{t.description}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} title={t.description}>
+                        <div className="truncate" style={{ fontWeight: 600 }}>{t.displayMerchant || t.description}</div>
+                        {t.displayMerchant && t.displayMerchant !== t.description && (
+                          <div className="truncate" style={{ color: 'var(--text-dim)', fontSize: 11 }}>{t.description}</div>
+                        )}
+                      </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         <span style={{ color: cardCfg.color, fontWeight: 600 }}>{cardCfg.emoji} {cardCfg.short || t.card}</span>
                       </td>
@@ -2202,7 +2377,7 @@
           '='.repeat(52),
           '',
           ...charityTxs.map(t =>
-            `${t.dateStr}  ${fmtD(t.amount).padStart(10)}  ${t.description}`
+            `${t.dateStr}  ${fmtD(t.amount).padStart(10)}  ${t.displayMerchant || t.description} (${t.description})`
           ),
           '',
           '='.repeat(52),
@@ -2279,7 +2454,7 @@
                             return (
                               <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                                 <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
-                                <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} className="truncate" title={t.description}>{t.description}</td>
+                                <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} className="truncate" title={t.description}>{t.displayMerchant || t.description}</td>
                                 <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: cardCfg.color, fontWeight: 600 }}>{cardCfg.emoji} {cardCfg.short || t.card}</td>
                                 <td style={{ padding: '10px 12px', fontWeight: 700, color: '#4ade80', whiteSpace: 'nowrap', textAlign: 'right' }}>{fmtD(t.amount)}</td>
                                 <td style={{ padding: '10px 12px' }}>
@@ -2323,7 +2498,7 @@
                             return (
                               <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                                 <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
-                                <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} className="truncate" title={t.description}>{t.description}</td>
+                                <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 300 }} className="truncate" title={t.description}>{t.displayMerchant || t.description}</td>
                                 <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: cardCfg.color, fontWeight: 600 }}>{cardCfg.emoji} {cardCfg.short || t.card}</td>
                                 <td style={{ padding: '10px 12px', fontWeight: 700, color: '#4ade80', whiteSpace: 'nowrap', textAlign: 'right' }}>{fmtD(t.amount)}</td>
                                 <td style={{ padding: '10px 12px' }}>
@@ -2426,7 +2601,7 @@
                       return (
                         <tr key={t.id} className="tx-row" style={{ borderBottom: '1px solid #0f172a' }}>
                           <td style={{ padding: '10px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.dateStr}</td>
-                          <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 340 }} className="truncate" title={t.description}>{t.description}</td>
+                          <td style={{ padding: '10px 12px', color: 'var(--text-base)', maxWidth: 340 }} className="truncate" title={t.description}>{t.displayMerchant || t.description}</td>
                           <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: cardCfg.color, fontWeight: 600 }}>{cardCfg.emoji} {cardCfg.short || t.card}</td>
                           <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text-hi)', whiteSpace: 'nowrap', textAlign: 'right' }}>{fmtD(t.amount)}</td>
                         </tr>
@@ -2472,7 +2647,7 @@
       const subs = useMemo(() => {
         const groups = {};
         transactions.forEach(t => {
-          const key = normalizeForGrouping(t._merchantKey || cleanMerchant(t.merchant || t.description));
+          const key = normalizeForGrouping(t.displayMerchant || t._merchantKey || cleanMerchant(t.merchant || t.description));
           if (!groups[key]) groups[key] = { key, transactions: [], months: new Set(), category: t.category };
           groups[key].transactions.push(t);
           groups[key].months.add(t.monthKey);
@@ -2606,9 +2781,9 @@
 
       const handleOverride = useCallback((tx, newCat) => {
         // Store one learned rule per merchant key, not per transaction ID
-        const mk = tx._merchantKey || cleanMerchant(tx.merchant || tx.description);
+        const mk = tx._merchantKey || canonicalMerchantIdentity(tx);
         const count = transactions.filter(t =>
-          (t._merchantKey || cleanMerchant(t.merchant || t.description)) === mk
+          (t._merchantKey || canonicalMerchantIdentity(t)) === mk
         ).length;
         setOverrides(prev => {
           const next = { ...prev };
@@ -2691,7 +2866,13 @@
           }
           all.push(...parsed);
         });
-        const categorized = all.map(t => ({ ...t, category: categorize(t) }));
+        const categorized = all.map(t => {
+          const _merchantKey = canonicalMerchantIdentity(t);
+          const displayMerchant = formatMerchantName({ ...t, _merchantKey });
+          const prepped = { ...t, _merchantKey, displayMerchant };
+          const category = categorize(prepped);
+          return { ...prepped, category, displayMerchant: formatMerchantName({ ...prepped, category }) };
+        });
         categorized.sort((a,b) => b.dateStr.localeCompare(a.dateStr));
         setTransactions(categorized);
       }, [loadedFileList, CATEGORIZER_VERSION]);
@@ -2704,11 +2885,13 @@
       // Apply learned merchant rules on top of auto-detected categories
       const effectiveTxs = useMemo(() =>
         transactions.map(t => {
-          const mk = cleanMerchant(t.merchant || t.description);
-          const learned = overrides[mk];
+          const mk = t._merchantKey || canonicalMerchantIdentity(t);
+          const learned = getMerchantOverride(overrides, mk);
+          const category = learned !== undefined ? learned : t.category;
+          const displayMerchant = formatMerchantName({ ...t, category });
           return learned !== undefined
-            ? { ...t, category: learned, _autoCategory: t.category, _merchantKey: mk }
-            : { ...t, _merchantKey: mk };
+            ? { ...t, category, displayMerchant, _autoCategory: t.category, _merchantKey: mk }
+            : { ...t, displayMerchant, _merchantKey: mk };
         }),
         [transactions, overrides]
       );
@@ -2725,7 +2908,7 @@
           // Card total
           byCard[t.card] = (byCard[t.card] || 0) + t.amount;
           // Merchant
-          const key = normalizeForGrouping(t._merchantKey);
+          const key = normalizeForGrouping(t.displayMerchant || t._merchantKey);
           if (!byMerchant[key]) byMerchant[key] = { name: key, total: 0, count: 0, category: t.category };
           byMerchant[key].total += t.amount;
           byMerchant[key].count++;
