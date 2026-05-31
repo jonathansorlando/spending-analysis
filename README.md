@@ -173,6 +173,54 @@ Browser → Route 53 → CloudFront (HTTPS, ACM cert) → S3 (private bucket, OA
 
 ### Deploying Updates
 
+Pushes to `main` publish automatically through GitHub Actions. The workflow uploads `index.html` to S3 and invalidates CloudFront using GitHub OIDC, so no long-lived AWS access keys are stored in the repo.
+
+Required GitHub repository settings:
+
+| Type | Name | Value |
+|------|------|-------|
+| Secret | `AWS_ROLE_TO_ASSUME` | ARN of the IAM role trusted by GitHub Actions |
+| Variable | `AWS_REGION` | AWS region used for AWS API calls |
+| Variable | `S3_BUCKET` | S3 bucket name that backs the site |
+| Variable | `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront distribution ID |
+
+The IAM role should be scoped to this repository and only needs permission to upload the single HTML file and create CloudFront invalidations. Example permission policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::<your-bucket>/index.html"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation"
+      ],
+      "Resource": "arn:aws:cloudfront::<account-id>:distribution/<distribution-id>"
+    }
+  ]
+}
+```
+
+Example trust policy condition for the role:
+
+```json
+{
+  "StringEquals": {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    "token.actions.githubusercontent.com:sub": "repo:jonathansorlando/spending-analysis:environment:production"
+  }
+}
+```
+
+Manual equivalent:
+
 ```bash
 # Upload new version
 aws s3 cp index.html s3://<your-bucket>/index.html --content-type "text/html"
