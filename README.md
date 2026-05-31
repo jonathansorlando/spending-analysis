@@ -1,6 +1,6 @@
-# 2025 Credit Card Spending Analysis
+# Credit Card Spending Analysis
 
-A private, single-file web app for analyzing household credit card spending across American Express, Apple Card, and Chase. Drop in your CSV exports and get an interactive dashboard with categorized transactions, charts, trend analysis, and credit card optimization recommendations — all processed locally in your browser with no data ever leaving your device.
+A private, single-file web app for analyzing household credit card spending across American Express, Apple Card, Chase, and manually named cards. Drop in your CSV exports and get an interactive dashboard with categorized transactions, charts, trend analysis, tax summaries, subscription review, and credit card optimization recommendations — all processed locally in your browser with no data ever leaving your device.
 
 Live at **[expenses.jsorlando.com](https://expenses.jsorlando.com)**
 
@@ -8,7 +8,7 @@ Live at **[expenses.jsorlando.com](https://expenses.jsorlando.com)**
 
 ## What It Does
 
-The app takes the CSV transaction exports from up to three credit cards and produces a unified view of all household spending. It auto-detects the card type from the CSV format, categorizes every transaction using a rule-based engine, and presents the data across five interactive views.
+The app takes CSV transaction exports from one or more credit cards and produces a unified view of household spending. It auto-detects known card formats, asks you to confirm or name each file, categorizes every transaction using a rule-based engine, and presents the data across seven interactive views.
 
 ### Upload & Parsing
 
@@ -20,7 +20,7 @@ The landing screen accepts CSV files via drag-and-drop or file picker. Each file
 | Apple Card | `Clearing Date` + `Purchased By` columns |
 | Chase | `Post Date` + `Memo` columns |
 
-Payments, credits, and refunds are filtered out. Only charges are included. Transactions outside 2025 are excluded.
+Payments, credits, and refunds are filtered out. Only charges are included. The dashboard derives its display year from the uploaded transaction data.
 
 ### Categorization
 
@@ -41,17 +41,21 @@ Every transaction is run through a priority-ordered set of regex rules that matc
 
 Any transaction's category can be overridden by clicking its category badge in the Transactions tab. When you reassign a category, the app creates a merchant-level rule that applies to **all** transactions from that merchant — past and future. Learned rules are marked with 🧠 and persist across sessions via `localStorage`. Rules can be removed individually or reset all at once.
 
+#### Other Review
+
+The Transactions tab includes an uncategorized merchant workbench for rows that still land in **Other**. It groups uncategorized transactions by merchant, shows suggested categories from merchant/category hints when available, and applies merchant-level rules in one click.
+
 ---
 
-## The Five Tabs
+## The Seven Tabs
 
 ### Overview
 
 High-level household snapshot:
 
-- **Stat cards** — total spend, monthly average, top category, peak month
+- **Stat cards** — total spend, active-month average, top category, peak month
 - **Donut chart** — top 10 categories by spend (remaining categories collapsed into an "N more" slice)
-- **Stacked bar chart** — monthly spend broken out by card (Amex / Apple Card / Chase)
+- **Stacked bar chart** — monthly spend broken out by card, including manually named cards
 - **Card totals** — annual spend per card with color-coded badges
 - **Cardholder split** — per-person spend with progress bars, shown only when multiple cardholders are present (names pulled directly from the CSV)
 
@@ -68,6 +72,8 @@ A card for every category that has at least one transaction:
 Time-series and merchant views:
 
 - **Monthly Spending Trend** — same stacked bar chart as Overview, with a monthly summary grid showing each month's total
+- **Category heatmap** — month-by-month spend intensity by category
+- **Day-of-week chart** — spend totals and transaction counts by weekday
 - **Top Merchants by Spend** — horizontal bar chart of the 12 highest-spend merchants, color-coded by category, showing dollar amount and transaction count on hover
 
 ### Transactions
@@ -79,6 +85,7 @@ Full transaction ledger with:
 - **Category filter** — show one category or all
 - **Sortable columns** — date (default: newest first) and amount
 - **Learned-only toggle** — show only transactions with overridden categories
+- **Other Review** — bulk-review uncategorized merchant groups and apply suggested merchant rules
 - **Pagination** — 50 transactions per page
 - **Inline category editing** — click any badge to reassign; changes propagate to all matching merchants instantly
 
@@ -91,6 +98,23 @@ Hardcoded analysis cards with reward optimization math specific to the household
 - Transit spending patterns
 - Recurring charge identification
 - Category-specific observations (e.g. high retail spend, pet care costs, health & medical)
+
+### Subscriptions
+
+Recurring-charge review:
+
+- Detects merchants that appear in at least two months
+- Estimates monthly and annualized spend
+- Lets you tag each recurring merchant as Keep, Review, or Cancel
+- Saves tags locally in `localStorage`
+
+### Tax
+
+Tax-prep helper views:
+
+- Charitable contribution summary with $250+ receipt warnings
+- Copyable donation ledger for tax prep
+- Medical and dental expense summary with a 7.5% AGI threshold calculator
 
 ---
 
