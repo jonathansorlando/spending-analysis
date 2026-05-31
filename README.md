@@ -158,9 +158,9 @@ Rules are evaluated in priority order — more specific rules (e.g. `Pet Care`, 
 
 ### Merchant Display Names
 
-Raw statement descriptions are preserved, but the dashboard formats noisy merchant text into readable display names for tables, charts, recurring-charge groups, and review workflows. For example, a statement label such as `Hillstone 212.689.10new york ny` displays as `Hillstone Restaurant`, while the original text remains available in tooltips and copied tax-prep output.
+Raw statement descriptions are preserved, but the dashboard formats noisy merchant text into readable display names for tables, charts, recurring-charge groups, and review workflows. For example, a statement label such as `MERCHANT 555.123.4567NEW YORK NY` can display as `Merchant Name`, while the original text remains available in tooltips and copied tax-prep output.
 
-The app also keeps a separate canonical merchant identity for grouping and learned rules. This lets processor variants collapse into the same merchant even when their statement text differs. For example, `MANHATTAN CTR FOR CBNEW YORK` and `PROPAY*Manhattan Cen6468634225 NY` both resolve to `Manhattan Center for CBT`; recurring equal-amount charges are a useful signal when deciding which aliases should be merged.
+The app also keeps a separate canonical merchant identity for grouping and learned rules. This lets processor variants collapse into the same merchant even when their statement text differs. Recurring equal-amount charges are a useful signal when deciding which aliases should be merged.
 
 ---
 
